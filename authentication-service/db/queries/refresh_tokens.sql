@@ -7,6 +7,11 @@ returning id;
 select id, user_id, token_hash, issued_at, expires_at, revoked_at, user_agent, ip
 from refresh_tokens where token_hash = $1;
 
+-- name: GetActiveRefreshTokenByID :one
+select id, user_id, token_hash, issued_at, expires_at, revoked_at, user_agent, ip
+from refresh_tokens
+where id = $1 and revoked_at is null;
+
 -- name: RevokeRefreshToken :exec
 update refresh_tokens set revoked_at = now() where id = $1;
 

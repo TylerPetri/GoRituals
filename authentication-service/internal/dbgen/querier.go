@@ -11,6 +11,7 @@ import (
 type Querier interface {
 	DeleteExpiredTokens(ctx context.Context) error
 	DeleteUser(ctx context.Context, id int64) error
+	GetActiveRefreshTokenByID(ctx context.Context, id int64) (RefreshToken, error)
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (RefreshToken, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id int64) (User, error)
