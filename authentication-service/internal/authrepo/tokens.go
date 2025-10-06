@@ -91,3 +91,125 @@ func (t *Tokens) Verify(ctx context.Context, token string) (dbgen.RefreshToken, 
 
 	return rt, nil
 }
+
+func joinIDToken(id int64, plain string) string {
+	return fmt.Sprintf("%d.%s", id, plain)
+}
+
+func splitIDToken(tok string) (id int64, plain string, err error) {
+	parts := strings.SplitN(tok, ".", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return 0, "", ErrInvalidTokenFormat
+	}
+	v, parseErr := strconv.ParseInt(parts[0], 10, 64)
+	if parseErr != nil || v <= 0 {
+		return 0, "", ErrInvalidTokenFormat
+	}
+	return v, parts[1], nil
+}
+
+// Rotate verifies the presented token, revokes it, and mints a new one.
+// Not atomic; if you need strict atomicity, use RotateInTx with a DB tx.
+func (t *Tokens) Rotate(ctx context.Context, token, ua, ip string, ttl time.Duration) (newCombined string, newRT dbgen.RefreshToken, err error) {
+	// 1) Verify current token (format, active, not expired, hash matches)
+	rt, err := t.Verify(ctx, token)
+	if err != nil {
+		return "", dbgen.RefreshToken{}, err
+	}
+
+	// 2) Revoke old token
+	if err := t.q.RevokeRefreshTokenByID(ctx, rt.ID); err != nil {
+		return "", dbgen.RefreshToken{}, err
+	}
+
+	// 3) Mint replacement for same user
+	plain, newID, err := t.Mint(ctx, rt.UserID, ttl, ua, ip)
+	if err != nil {
+		return "", dbgen.RefreshToken{}, err
+	}
+
+	// 4) Fetch & return the new DB row (optional, but handy)
+	newRT, err = t.q.GetActiveRefreshTokenByID(ctx, newID)
+	if err != nil {
+		return "", dbgen.RefreshToken{}, err
+	}
+
+	return joinIDToken(newID, plain), newRT, nil
+}
+
+// RotateInTx performs rotation atomically. Call it inside a DB transaction.
+// q must be bound to a transactional connection (pgx.Tx).
+func RotateInTx(ctx context.Context, q dbgen.Querier, token, ua, ip string, ttl time.Duration) (string, dbgen.RefreshToken, error) {
+	id, plain, err := splitIDToken(token)
+	if err != nil {
+		return "", dbgen.RefreshToken{}, err
+	}
+
+	// 1) Lock the token row to avoid races
+	cur, err := q.LockActiveRefreshTokenByID(ctx, id)
+	if err != nil {
+		return "", dbgen.RefreshToken{}, err
+	}
+
+	// 2) Expiry & hash check
+	if time.Now().After(cur.ExpiresAt) {
+		return "", dbgen.RefreshToken{}, ErrTokenExpired
+	}
+	ok, err := VerifyPassword(plain, cur.TokenHash)
+	if err != nil {
+		return "", dbgen.RefreshToken{}, err
+	}
+	if !ok {
+		return "", dbgen.RefreshToken{}, ErrTokenMismatch
+	}
+
+	// 3) Revoke current
+	if err := q.RevokeRefreshTokenByID(ctx, id); err != nil {
+		return "", dbgen.RefreshToken{}, err
+	}
+
+	// 4) Mint new (inline, so we stay in the same tx)
+	//    This mirrors t.Mint but uses q directly.
+	raw := make([]byte, 32)
+	if _, err := rand.Read(raw); err != nil {
+		return "", dbgen.RefreshToken{}, err
+	}
+	newPlain := base64.RawURLEncoding.EncodeToString(raw)
+
+	hash, err := HashPassword(newPlain, DefaultArgon2)
+	if err != nil {
+		return "", dbgen.RefreshToken{}, err
+	}
+
+	newID, err := q.InsertRefreshToken(ctx, dbgen.InsertRefreshTokenParams{
+		UserID:    cur.UserID,
+		TokenHash: hash,
+		ExpiresAt: time.Now().Add(ttl),
+		UserAgent: ua,
+		Ip:        ip,
+	})
+	if err != nil {
+		return "", dbgen.RefreshToken{}, err
+	}
+
+	newRT, err := q.GetActiveRefreshTokenByID(ctx, newID)
+	if err != nil {
+		return "", dbgen.RefreshToken{}, err
+	}
+
+	return joinIDToken(newID, newPlain), newRT, nil
+}
+
+// Revoke verifies the token first, then revokes it (non-atomic).
+func (t *Tokens) Revoke(ctx context.Context, token string) error {
+	rt, err := t.Verify(ctx, token)
+	if err != nil {
+		return err
+	}
+	return t.q.RevokeRefreshTokenByID(ctx, rt.ID)
+}
+
+// RevokeAllForUser is straightforward with the named query.
+func (t *Tokens) RevokeAllForUser(ctx context.Context, userID int64) error {
+	return t.q.RevokeAllForUser(ctx, userID)
+}

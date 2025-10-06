@@ -18,8 +18,10 @@ type Querier interface {
 	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) (int64, error)
 	InsertUser(ctx context.Context, arg InsertUserParams) (int64, error)
 	ListUsers(ctx context.Context) ([]User, error)
+	LockActiveRefreshTokenByID(ctx context.Context, id int64) (RefreshToken, error)
 	RevokeAllForUser(ctx context.Context, userID int64) error
 	RevokeRefreshToken(ctx context.Context, id int64) error
+	RevokeRefreshTokenByID(ctx context.Context, id int64) error
 	UpdateUser(ctx context.Context, arg UpdateUserParams) error
 	UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error
 }

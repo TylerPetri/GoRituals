@@ -89,6 +89,29 @@ func (q *Queries) InsertRefreshToken(ctx context.Context, arg InsertRefreshToken
 	return id, err
 }
 
+const lockActiveRefreshTokenByID = `-- name: LockActiveRefreshTokenByID :one
+select id, user_id, token_hash, issued_at, expires_at, revoked_at, user_agent, ip
+from refresh_tokens
+where id = $1 and revoked_at is null
+for update
+`
+
+func (q *Queries) LockActiveRefreshTokenByID(ctx context.Context, id int64) (RefreshToken, error) {
+	row := q.db.QueryRow(ctx, lockActiveRefreshTokenByID, id)
+	var i RefreshToken
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.TokenHash,
+		&i.IssuedAt,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+		&i.UserAgent,
+		&i.Ip,
+	)
+	return i, err
+}
+
 const revokeAllForUser = `-- name: RevokeAllForUser :exec
 update refresh_tokens set revoked_at = now() where user_id = $1 and revoked_at is null
 `
@@ -104,5 +127,15 @@ update refresh_tokens set revoked_at = now() where id = $1
 
 func (q *Queries) RevokeRefreshToken(ctx context.Context, id int64) error {
 	_, err := q.db.Exec(ctx, revokeRefreshToken, id)
+	return err
+}
+
+const revokeRefreshTokenByID = `-- name: RevokeRefreshTokenByID :exec
+update refresh_tokens set revoked_at = now()
+where id = $1 and revoked_at is null
+`
+
+func (q *Queries) RevokeRefreshTokenByID(ctx context.Context, id int64) error {
+	_, err := q.db.Exec(ctx, revokeRefreshTokenByID, id)
 	return err
 }
