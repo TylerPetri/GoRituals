@@ -1,0 +1,13 @@
+version: "3.9"
+services:
+  auth:
+    build: .
+    image: myorg/auth-service:dev
+    env_file: .env
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./secrets:/secrets:ro
+    # optional if your image runs as non-root and your host files are owned by you:
+    # user: "1000:1000"
+    restart: unless-stopped
