@@ -164,12 +164,6 @@ func clientIP(r *http.Request) string {
 	return host
 }
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
 func errorBody(msg string) map[string]string {
 	return map[string]string{"error": msg}
 }

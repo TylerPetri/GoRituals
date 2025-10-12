@@ -1,106 +1,69 @@
 package main
 
 import (
+	"context"
 	"log"
+	"net/http"
+	"time"
+
+	"authentication/internal/authrepo"
+	"authentication/internal/dbgen"
+	"authentication/internal/httpapi"
+	"authentication/internal/store"
 )
 
-const webPort = "80"
-
-type Config struct {
-}
-
 func main() {
-	log.Println("Starting authentication service on port:", webPort)
+	// Load config from env
+	cfg, err := httpapi.LoadConfigFromEnv()
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	// h := &httpapi.Handler{
-	// 	Store:     store,
-	// 	Tokens:    authrepo.NewTokens(dbgen.New(store.Pool)), // or however you wire it
-	// 	JWTIssuer: myJWTIssuer,                               // implements IssueAccessToken
-	// }
-	// mux.HandleFunc("/v1/tokens/refresh", h.RefreshToken)
+	// Open DB (adjust config for your store)
+	ctx := context.Background()
+	st, err := store.Open(ctx, store.Config{
+		DSN:             mustEnv("DATABASE_URL"),
+		MaxConns:        10,
+		MinConns:        1,
+		MaxConnIdleTime: 5 * time.Minute,
+		HealthTimeout:   3 * time.Second,
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer st.Close()
 
-	// ------------ SIMPLE SHARED SECRET ----------------
+	// Repos
+	tokens := authrepo.NewTokens(dbgen.New(st.Pool))
 
-	// secret := []byte(os.Getenv("JWT_HS256_SECRET")) // length >= 32 recommended
-	// issuer := "https://auth.example.com"
-	// aud := "my-api"
+	// Build issuer + JWKS
+	issuer, rsaIss, edIss := httpapi.BuildIssuer(cfg)
 
-	// h := &httpapi.Handler{
-	// 	Store:     store,
-	// 	Tokens:    authrepo.NewTokens(dbgen.New(store.Pool)),
-	// 	JWTIssuer: httpapi.NewHS256Issuer(secret, issuer, aud, "v1"), // kid "v1" (optional)
-	// }
-	// mux.HandleFunc("/v1/tokens/refresh", h.RefreshToken)
+	// HTTP Handler and Mux
+	h := &httpapi.Handler{
+		Store:     st,
+		Tokens:    tokens,
+		JWTIssuer: issuer,
+	}
+	mux := httpapi.NewMux(h, rsaIss, edIss, cfg.PublicBaseURL)
 
-	// ----------- RSA + JWKS (key rotation friendly) ----------------
-
-	// Load/generate your active private key (PEM parsing not shown here).
-	// priv, _ := httpapi.GenerateRSAKey(2048) // or load from disk/KMS
-	// issuer := "https://auth.example.com"
-	// aud := "my-api"
-
-	// rsaIssuer := httpapi.NewRSAJWKSIssuer("kid-2025-10", priv, issuer, aud)
-
-	// // Optionally add older public keys so existing tokens still verify:
-	// rsaIssuer.AddPublicKey("kid-2025-06", &oldPriv.PublicKey) // if rotating
-
-	// h := &httpapi.Handler{
-	//     Store:     store,
-	//     Tokens:    authrepo.NewTokens(dbgen.New(store.Pool)),
-	//     JWTIssuer: rsaIssuer,
-	// }
-	// mux.Handle("/.well-known/jwks.json", rsaIssuer.JWKSHandler())
-	// mux.HandleFunc("/v1/tokens/refresh", h.RefreshToken)
-
-	// ------------------ VERIFY TOKEN ISSUED BY OWN SERVICE (local JWKS) ----------------------
-
-	// Build a static provider from your issuer’s public keys
-	// static := httpapi.NewStaticJWKSProvider()
-	// for kid, pub := range rsaIssuer.PubKeys {
-	// 	static.Add(kid, pub)
-	// }
-	// ver := &httpapi.JWTVerifier{
-	// 	Issuer:   "https://auth.example.com",
-	// 	Audience: "my-api",
-	// 	Keys:     static,
-	// }
-
-	// // Protect routes
-	// mux.Handle("/v1/me", httpapi.AuthMiddleware(ver, http.HandlerFunc(meHandler)))
-
-	// ------------------ VERIFY TOKEN FROM ANOTHER SERVICE VITA HTTP JWKS --------------------------
-
-	// jwksURL := "https://auth.example.com/.well-known/jwks.json"
-	// prov := httpapi.NewHTTPJWKSProvider(jwksURL, 10*time.Minute)
-
-	// ver := &httpapi.JWTVerifier{
-	// 	Issuer:   "https://auth.example.com",
-	// 	Audience: "my-api",
-	// 	Keys:     prov,
-	// }
-	// mux.Handle("/v1/me", httpapi.AuthMiddleware(ver, http.HandlerFunc(meHandler)))
-
-	// -------------------- HS256 WIRE IT UP ----------------------------------------------
-
-	// Issuer side (you already have HS256Issuer for issuing)
-	// secret := []byte(os.Getenv("JWT_HS256_SECRET")) // >=32 bytes recommended
-	// issuer := "https://auth.example.com"
-	// aud     := "my-api"
-
-	// // Verifier (same service or another service)
-	// secrets := NewStaticHSSecrets().
-	// 	Add("v1", secret). // kid must match the HS256Issuer's KID
-	// 	SetDefault("v1")   // allows tokens without kid header (optional)
-
-	// hsVer := &HS256Verifier{
-	// 	Issuer:   issuer,
-	// 	Audience: aud,
-	// 	Keys:     secrets,
-	// }
-
-	// // Protect routes with the generic middleware
-	// mux.Handle("/v1/me", AuthMiddlewareAny(hsVer, http.HandlerFunc(meHandler)))
-
+	log.Printf("auth service on %s (alg=%s)", cfg.HTTPAddr, cfg.Alg)
+	if err := http.ListenAndServe(cfg.HTTPAddr, mux); err != nil {
+		log.Fatal(err)
+	}
 }
 
-// For production, store HS256 secrets and RSA private keys in KMS/HSM or your secret manager, not in code or env if you can avoid it. When rotating RSA keys, publish the new public key to JWKS before switching ActiveKID, then switch and keep old keys in the JWKS until all old tokens have expired.
+func mustEnv(k string) string {
+	v := getenv(k, "")
+	if v == "" {
+		log.Fatalf("missing env %s", k)
+	}
+	return v
+}
+func getenv(k, def string) string {
+	if v := syscallGetenv(k); v != "" {
+		return v
+	}
+	return def
+}
+func syscallGetenv(k string) string { return "" } // replace with os.Getenv in your code
