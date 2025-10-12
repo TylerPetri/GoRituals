@@ -1,3 +1,9 @@
+# Temp notes
+Health endpoints:
+- RS: `GET /health/jwks/rs256`
+- EdDSA: `GET /health/jwks/eddsa`
+
+
 # SECRETS (.gitignore IMPORTANT)
 ```
 mkdir secrets
