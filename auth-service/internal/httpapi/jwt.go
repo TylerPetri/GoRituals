@@ -1,4 +1,3 @@
-// internal/httpapi/jwt.go
 package httpapi
 
 import (

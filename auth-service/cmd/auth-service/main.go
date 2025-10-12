@@ -66,4 +66,4 @@ func getenv(k, def string) string {
 	}
 	return def
 }
-func syscallGetenv(k string) string { return "" } // replace with os.Getenv in your code
+func syscallGetenv(k string) string { return "" }

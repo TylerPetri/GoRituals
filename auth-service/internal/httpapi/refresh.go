@@ -1,4 +1,3 @@
-// internal/httpapi/refresh.go
 package httpapi
 
 import (
