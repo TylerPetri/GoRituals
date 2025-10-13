@@ -9,15 +9,29 @@ cat > .env <<'ENV'
 PUBLIC_BASE_URL=http://localhost:8080
 JWT_ISSUER=http://localhost:8080
 JWT_AUDIENCE=my-api
+HTTP_ADDR=:8080
 JWT_ALG=RS256
 JWT_RS256_ACTIVE_KID=kid-2025-10
 JWT_RS256_PRIVATE_KEY_FILE=/secrets/kid-2025-10.key
 JWT_RS256_PUBLIC_KEYS=kid-2025-06=/secrets/kid-2025-06.pub
-DATABASE_URL=postgres://user:pass@localhost:5432/app?sslmode=disable
-HTTP_ADDR=:8080
+POSTGRES_USER=app
+POSTGRES_PASSWORD=app
+POSTGRES_DB=app
+DATABASE_URL=postgres://app:app@db:5432/app?sslmode=disable
+LOG_LEVEL=debug
+LOG_FORMAT=json
 ENV
 
-docker compose up --build
+sqlc generate
+
+make db-up
+make migrate-up
+
+make auth-up
+(optional) make auth-logs
+
+(test routes) make smoke
+(or import postman_auth_collenction.json to postman)
 ```
 ### Switch to Ed25519:
 ```
