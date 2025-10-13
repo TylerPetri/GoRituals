@@ -18,7 +18,7 @@ sql:
           - db_type: "citext"
             go_type: "string"
           - db_type: "inet"
-            go_type: "string"
+            go_type: "net/netip.Addr"
           - db_type: "text"
             nullable: true
             go_type: "database/sql.NullString"

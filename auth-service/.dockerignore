@@ -1,0 +1,12 @@
+.git
+**/*.log
+secrets
+db/init
+db/pgdata
+node_modules
+bin
+dist
+tmp
+.idea
+.vscode
+.env

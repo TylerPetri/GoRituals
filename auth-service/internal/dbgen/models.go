@@ -6,6 +6,7 @@ package dbgen
 
 import (
 	"database/sql"
+	"net/netip"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -26,8 +27,8 @@ type RefreshToken struct {
 	IssuedAt  time.Time          `json:"issued_at"`
 	ExpiresAt time.Time          `json:"expires_at"`
 	RevokedAt pgtype.Timestamptz `json:"revoked_at"`
-	UserAgent string             `json:"user_agent"`
-	Ip        string             `json:"ip"`
+	Ua        string             `json:"ua"`
+	Ip        netip.Addr         `json:"ip"`
 }
 
 type User struct {

@@ -7,6 +7,7 @@ package dbgen
 
 import (
 	"context"
+	"net/netip"
 	"time"
 )
 
@@ -20,7 +21,7 @@ func (q *Queries) DeleteExpiredTokens(ctx context.Context) error {
 }
 
 const getActiveRefreshTokenByID = `-- name: GetActiveRefreshTokenByID :one
-select id, user_id, token_hash, issued_at, expires_at, revoked_at, user_agent, ip
+select id, user_id, token_hash, issued_at, expires_at, revoked_at, ua, ip
 from refresh_tokens
 where id = $1 and revoked_at is null
 `
@@ -35,14 +36,14 @@ func (q *Queries) GetActiveRefreshTokenByID(ctx context.Context, id int64) (Refr
 		&i.IssuedAt,
 		&i.ExpiresAt,
 		&i.RevokedAt,
-		&i.UserAgent,
+		&i.Ua,
 		&i.Ip,
 	)
 	return i, err
 }
 
 const getRefreshTokenByHash = `-- name: GetRefreshTokenByHash :one
-select id, user_id, token_hash, issued_at, expires_at, revoked_at, user_agent, ip
+select id, user_id, token_hash, issued_at, expires_at, revoked_at, ua, ip
 from refresh_tokens where token_hash = $1
 `
 
@@ -56,41 +57,50 @@ func (q *Queries) GetRefreshTokenByHash(ctx context.Context, tokenHash string) (
 		&i.IssuedAt,
 		&i.ExpiresAt,
 		&i.RevokedAt,
-		&i.UserAgent,
+		&i.Ua,
 		&i.Ip,
 	)
 	return i, err
 }
 
 const insertRefreshToken = `-- name: InsertRefreshToken :one
-insert into refresh_tokens (user_id, token_hash, expires_at, user_agent, ip)
+insert into refresh_tokens (user_id, token_hash, expires_at, ua, ip)
 values ($1, $2, $3, $4, $5)
-returning id
+RETURNING id, user_id, token_hash, issued_at, expires_at, revoked_at, ua, ip
 `
 
 type InsertRefreshTokenParams struct {
-	UserID    int64     `json:"user_id"`
-	TokenHash string    `json:"token_hash"`
-	ExpiresAt time.Time `json:"expires_at"`
-	UserAgent string    `json:"user_agent"`
-	Ip        string    `json:"ip"`
+	UserID    int64      `json:"user_id"`
+	TokenHash string     `json:"token_hash"`
+	ExpiresAt time.Time  `json:"expires_at"`
+	Ua        string     `json:"ua"`
+	Ip        netip.Addr `json:"ip"`
 }
 
-func (q *Queries) InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) (int64, error) {
+func (q *Queries) InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) (RefreshToken, error) {
 	row := q.db.QueryRow(ctx, insertRefreshToken,
 		arg.UserID,
 		arg.TokenHash,
 		arg.ExpiresAt,
-		arg.UserAgent,
+		arg.Ua,
 		arg.Ip,
 	)
-	var id int64
-	err := row.Scan(&id)
-	return id, err
+	var i RefreshToken
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.TokenHash,
+		&i.IssuedAt,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+		&i.Ua,
+		&i.Ip,
+	)
+	return i, err
 }
 
 const lockActiveRefreshTokenByID = `-- name: LockActiveRefreshTokenByID :one
-select id, user_id, token_hash, issued_at, expires_at, revoked_at, user_agent, ip
+select id, user_id, token_hash, issued_at, expires_at, revoked_at, ua, ip
 from refresh_tokens
 where id = $1 and revoked_at is null
 for update
@@ -106,7 +116,7 @@ func (q *Queries) LockActiveRefreshTokenByID(ctx context.Context, id int64) (Ref
 		&i.IssuedAt,
 		&i.ExpiresAt,
 		&i.RevokedAt,
-		&i.UserAgent,
+		&i.Ua,
 		&i.Ip,
 	)
 	return i, err

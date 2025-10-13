@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -41,17 +42,22 @@ func (t *Tokens) Mint(ctx context.Context, userID int64, ttl time.Duration, ua, 
 
 	expires := time.Now().Add(ttl)
 
+	addr, perr := netip.ParseAddr(ip)
+	if perr != nil {
+		addr = netip.MustParseAddr("0.0.0.0") // safe fallback for INET NOT NULL
+	}
+
 	newID, err := t.q.InsertRefreshToken(ctx, dbgen.InsertRefreshTokenParams{
 		UserID:    userID,
 		TokenHash: hash,
 		ExpiresAt: expires,
-		UserAgent: ua,
-		Ip:        ip,
+		Ua:        ua,
+		Ip:        addr,
 	})
 	if err != nil {
 		return "", 0, err
 	}
-	return fmt.Sprintf("%d.%s", newID, plain), int64(newID), nil
+	return fmt.Sprintf("%d.%s", newID.ID, plain), int64(newID.ID), nil
 }
 
 func (t *Tokens) Verify(ctx context.Context, token string) (dbgen.RefreshToken, error) {
@@ -110,31 +116,31 @@ func splitIDToken(tok string) (id int64, plain string, err error) {
 
 // Rotate verifies the presented token, revokes it, and mints a new one.
 // Not atomic; if you need strict atomicity, use RotateInTx with a DB tx.
-func (t *Tokens) Rotate(ctx context.Context, token, ua, ip string, ttl time.Duration) (newCombined string, newRT dbgen.RefreshToken, err error) {
+func (t *Tokens) Rotate(ctx context.Context, presented string, ttl time.Duration, ua, ip string) (newCombined string, newRT dbgen.RefreshToken, err error) {
 	// 1) Verify current token (format, active, not expired, hash matches)
-	rt, err := t.Verify(ctx, token)
+	rt, err := t.Verify(ctx, presented)
 	if err != nil {
 		return "", dbgen.RefreshToken{}, err
 	}
 
-	// 2) Revoke old token
+	// 2) Revoke the OLD token
 	if err := t.q.RevokeRefreshTokenByID(ctx, rt.ID); err != nil {
 		return "", dbgen.RefreshToken{}, err
 	}
 
-	// 3) Mint replacement for same user
-	plain, newID, err := t.Mint(ctx, rt.UserID, ttl, ua, ip)
+	// 3) Mint NEW token for same user
+	combined, newID, err := t.Mint(ctx, rt.UserID, ttl, ua, ip) // first return is already "<id>.<plain>"
 	if err != nil {
 		return "", dbgen.RefreshToken{}, err
 	}
 
-	// 4) Fetch & return the new DB row (optional, but handy)
+	// 4) Fetch & return the new DB row (optional but handy)
 	newRT, err = t.q.GetActiveRefreshTokenByID(ctx, newID)
 	if err != nil {
 		return "", dbgen.RefreshToken{}, err
 	}
 
-	return joinIDToken(newID, plain), newRT, nil
+	return combined, newRT, nil
 }
 
 // RotateInTx performs rotation atomically. Call it inside a DB transaction.
@@ -181,23 +187,28 @@ func RotateInTx(ctx context.Context, q dbgen.Querier, token, ua, ip string, ttl 
 		return "", dbgen.RefreshToken{}, err
 	}
 
+	addr, perr := netip.ParseAddr(ip)
+	if perr != nil {
+		addr = netip.MustParseAddr("0.0.0.0") // safe fallback for INET NOT NULL
+	}
+
 	newID, err := q.InsertRefreshToken(ctx, dbgen.InsertRefreshTokenParams{
 		UserID:    cur.UserID,
 		TokenHash: hash,
 		ExpiresAt: time.Now().Add(ttl),
-		UserAgent: ua,
-		Ip:        ip,
+		Ua:        ua,
+		Ip:        addr,
 	})
 	if err != nil {
 		return "", dbgen.RefreshToken{}, err
 	}
 
-	newRT, err := q.GetActiveRefreshTokenByID(ctx, newID)
+	newRT, err := q.GetActiveRefreshTokenByID(ctx, newID.ID)
 	if err != nil {
 		return "", dbgen.RefreshToken{}, err
 	}
 
-	return joinIDToken(newID, newPlain), newRT, nil
+	return joinIDToken(newID.ID, newPlain), newRT, nil
 }
 
 // Revoke verifies the token first, then revokes it (non-atomic).

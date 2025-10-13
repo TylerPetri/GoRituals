@@ -15,7 +15,7 @@ type Querier interface {
 	GetRefreshTokenByHash(ctx context.Context, tokenHash string) (RefreshToken, error)
 	GetUserByEmail(ctx context.Context, email string) (User, error)
 	GetUserByID(ctx context.Context, id int64) (User, error)
-	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) (int64, error)
+	InsertRefreshToken(ctx context.Context, arg InsertRefreshTokenParams) (RefreshToken, error)
 	InsertUser(ctx context.Context, arg InsertUserParams) (int64, error)
 	ListUsers(ctx context.Context) ([]User, error)
 	LockActiveRefreshTokenByID(ctx context.Context, id int64) (RefreshToken, error)

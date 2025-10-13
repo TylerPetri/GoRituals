@@ -149,3 +149,9 @@ PY
 ```
 openssl rand 32 | base64 | tr '+/' '-_' | tr -d '=' | tr -d '\n'
 ```
+
+# Sanity checks (handy)
+- Verify compose sees your env:
+`docker compose --env-file .env config | grep -A2 environment:`
+- Shell into DB container and check:
+`docker exec -it auth-db psql -U app -d app -c "select current_user, current_database();"`

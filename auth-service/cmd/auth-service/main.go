@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"log"
+	"log/slog"
 	"net/http"
+	"os"
 	"time"
 
 	"authentication/internal/authrepo"
@@ -12,14 +14,27 @@ import (
 	"authentication/internal/store"
 )
 
+func mustEnv(k string) string {
+	v := os.Getenv(k)
+	if v == "" {
+		log.Fatalf("missing env %s", k)
+	}
+	return v
+}
+
 func main() {
-	// Load config from env
 	cfg, err := httpapi.LoadConfigFromEnv()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// Open DB (adjust config for your store)
+	level := slog.LevelInfo
+	if os.Getenv("LOG_LEVEL") == "debug" {
+		level = slog.LevelDebug
+	}
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
+	slog.SetDefault(logger)
+
 	ctx := context.Background()
 	st, err := store.Open(ctx, store.Config{
 		DSN:             mustEnv("DATABASE_URL"),
@@ -33,37 +48,21 @@ func main() {
 	}
 	defer st.Close()
 
-	// Repos
 	tokens := authrepo.NewTokens(dbgen.New(st.Pool))
-
-	// Build issuer + JWKS
 	issuer, rsaIss, edIss := httpapi.BuildIssuer(cfg)
 
-	// HTTP Handler and Mux
 	h := &httpapi.Handler{
-		Store:     st,
-		Tokens:    tokens,
-		JWTIssuer: issuer,
+		Store:         st,
+		Tokens:        tokens,
+		JWTIssuer:     issuer,
+		CookieRefresh: true,
+		Logger:        logger,
+		Cfg:           cfg,
 	}
 	mux := httpapi.NewMux(h, rsaIss, edIss, cfg.PublicBaseURL)
 
-	log.Printf("auth service on %s (alg=%s)", cfg.HTTPAddr, cfg.Alg)
+	log.Printf("auth service on %s (alg=%s, iss=%s)", cfg.HTTPAddr, cfg.Alg, cfg.Issuer)
 	if err := http.ListenAndServe(cfg.HTTPAddr, mux); err != nil {
 		log.Fatal(err)
 	}
 }
-
-func mustEnv(k string) string {
-	v := getenv(k, "")
-	if v == "" {
-		log.Fatalf("missing env %s", k)
-	}
-	return v
-}
-func getenv(k, def string) string {
-	if v := syscallGetenv(k); v != "" {
-		return v
-	}
-	return def
-}
-func syscallGetenv(k string) string { return "" }

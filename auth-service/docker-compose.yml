@@ -1,13 +1,57 @@
-version: "3.9"
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: auth-db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Your auth service (already built in your repo)
   auth:
     build: .
-    image: myorg/auth-service:dev
     env_file: .env
-    ports:
-      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
     volumes:
       - ./secrets:/secrets:ro
-    # optional if your image runs as non-root and your host files are owned by you:
-    # user: "1000:1000"
+    ports:
+      - "8080:8080"
     restart: unless-stopped
+
+  # Optional: pgAdmin UI at http://localhost:5050
+  pgadmin:
+    image: dpage/pgadmin4:8.12
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  migrate:
+    image: migrate/migrate:4
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./db/migrations:/migrations:rw
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+
+volumes:
+  pgdata:

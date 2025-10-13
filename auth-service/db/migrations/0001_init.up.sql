@@ -22,7 +22,7 @@ create table if not exists refresh_tokens (
   issued_at    timestamptz not null default now(),
   expires_at   timestamptz not null,
   revoked_at   timestamptz,
-  user_agent   text,
+  ua   text,
   ip           inet
 );
 

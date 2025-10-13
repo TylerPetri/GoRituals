@@ -84,33 +84,6 @@ func mustLoadEdPublic(path string) ed25519.PublicKey {
 	return k
 }
 
-// NewMux wires routes based on what’s enabled.
-func NewMux(h *Handler, rsaIss *RSAJWKSIssuer, edIss *Ed25519Issuer, publicBase string) *http.ServeMux {
-	mux := http.NewServeMux()
-
-	// Combined JWKS (works if only one issuer is non-nil)
-	mux.Handle("/.well-known/jwks.json", CombinedJWKSHandler(rsaIss, edIss))
-
-	// Healthchecks
-	if rsaIss != nil {
-		mux.HandleFunc("/health/jwks/rs256", jwksHealthRS(rsaIss, publicBase))
-	}
-	if edIss != nil {
-		mux.HandleFunc("/health/jwks/eddsa", jwksHealthEdRemote(edIss, publicBase))
-	}
-
-	// Refresh endpoint (mints short-lived access JWT using whichever issuer you chose)
-	mux.HandleFunc("/v1/tokens/refresh", h.RefreshToken)
-
-	// Liveness
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
-
-	return mux
-}
-
 // RS256 health: fetch JWKS over HTTP, confirm active KID present and
 // verify a freshly issued token via the remote JWKS provider.
 func jwksHealthRS(iss *RSAJWKSIssuer, publicBase string) http.HandlerFunc {
@@ -165,4 +138,69 @@ type jwksRSAAdapter struct{ P *HTTPMultiJWKSProvider }
 
 func (a jwksRSAAdapter) Get(ctx context.Context, kid string) (*rsa.PublicKey, error) {
 	return a.P.GetRSA(ctx, kid)
+}
+
+// BuildAuthMiddleware returns a middleware that verifies access tokens using the configured algorithm.
+func BuildAuthMiddleware(cfg Config, rsaIss *RSAJWKSIssuer, edIss *Ed25519Issuer) func(http.Handler) http.Handler {
+	switch cfg.Alg {
+	case AlgHS256:
+		// HS256: local static secret provider (no JWKS)
+		secret, _ := base64.RawStdEncoding.DecodeString(cfg.HSSecretBase64)
+		secrets := NewStaticHSSecrets().Add(cfg.HSDefaultKID, secret).SetDefault(cfg.HSDefaultKID)
+		ver := &HS256Verifier{Issuer: cfg.Issuer, Audience: cfg.Audience, Keys: secrets}
+		return func(next http.Handler) http.Handler { return AuthMiddlewareAny(ver, next) }
+
+	case AlgRS256:
+		// RS256: verify against local in-process public keys (from issuer)
+		static := NewStaticJWKSProvider()
+		for kid, pub := range rsaIss.PubKeys {
+			static.Add(kid, pub)
+		}
+		ver := &JWTVerifier{Issuer: cfg.Issuer, Audience: cfg.Audience, Keys: static}
+		return func(next http.Handler) http.Handler { return AuthMiddleware(ver, next) }
+
+	case AlgEdDSA:
+		// Ed25519: local static map
+		keys := NewStaticEd25519Keys()
+		for kid, pub := range edIss.PubKeys {
+			keys.Add(kid, pub)
+		}
+		ver := &Ed25519Verifier{Issuer: cfg.Issuer, Audience: cfg.Audience, Keys: keys}
+		return func(next http.Handler) http.Handler { return AuthMiddlewareAny(ver, next) }
+
+	default:
+		// should not happen
+		return func(next http.Handler) http.Handler { return next }
+	}
+}
+
+func NewMux(h *Handler, rsaIss *RSAJWKSIssuer, edIss *Ed25519Issuer, publicBase string) *http.ServeMux {
+	mux := http.NewServeMux()
+
+	mux.Handle("/.well-known/jwks.json", CombinedJWKSHandler(rsaIss, edIss))
+
+	if rsaIss != nil {
+		mux.HandleFunc("/health/jwks/rs256", jwksHealthRS(rsaIss, publicBase))
+	}
+	if edIss != nil {
+		mux.HandleFunc("/health/jwks/eddsa", jwksHealthEdRemote(edIss, publicBase))
+	}
+	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+
+	// Public auth routes
+	mux.HandleFunc("/v1/auth/signup", h.SignUp)
+	mux.HandleFunc("/v1/auth/login", h.Login)
+	mux.HandleFunc("/v1/auth/logout", h.Logout)
+	mux.HandleFunc("/v1/tokens/refresh", h.RefreshToken)
+
+	// Protected routes
+	authz := BuildAuthMiddleware(h.Cfg, rsaIss, edIss)
+
+	mux.Handle("/v1/auth/logout-all", authz(http.HandlerFunc(h.LogoutAll)))
+	mux.Handle("/v1/me", authz(http.HandlerFunc(h.Me)))
+
+	return mux
 }

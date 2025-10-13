@@ -21,6 +21,7 @@ type Config struct {
 	Issuer        string // iss
 	Audience      string // aud
 	Alg           Alg    // one of HS256, RS256, EdDSA
+	Debug         bool
 
 	// HS256
 	HSDefaultKID   string // e.g. "v1"
@@ -100,6 +101,10 @@ func LoadConfigFromEnv() (Config, error) {
 		if _, err := base64.RawStdEncoding.DecodeString(cfg.HSSecretBase64); err != nil {
 			return cfg, errors.New("JWT_HS256_SECRET_B64 must be unpadded base64")
 		}
+	}
+
+	if os.Getenv("DEBUG") == "1" || os.Getenv("LOG_LEVEL") == "debug" {
+		cfg.Debug = true
 	}
 
 	return cfg, nil

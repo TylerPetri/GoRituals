@@ -1,14 +1,14 @@
 -- name: InsertRefreshToken :one
-insert into refresh_tokens (user_id, token_hash, expires_at, user_agent, ip)
+insert into refresh_tokens (user_id, token_hash, expires_at, ua, ip)
 values ($1, $2, $3, $4, $5)
-returning id;
+RETURNING id, user_id, token_hash, issued_at, expires_at, revoked_at, ua, ip;
 
 -- name: GetRefreshTokenByHash :one
-select id, user_id, token_hash, issued_at, expires_at, revoked_at, user_agent, ip
+select id, user_id, token_hash, issued_at, expires_at, revoked_at, ua, ip
 from refresh_tokens where token_hash = $1;
 
 -- name: GetActiveRefreshTokenByID :one
-select id, user_id, token_hash, issued_at, expires_at, revoked_at, user_agent, ip
+select id, user_id, token_hash, issued_at, expires_at, revoked_at, ua, ip
 from refresh_tokens
 where id = $1 and revoked_at is null;
 
@@ -22,7 +22,7 @@ update refresh_tokens set revoked_at = now() where user_id = $1 and revoked_at i
 delete from refresh_tokens where expires_at < now();
 
 -- name: LockActiveRefreshTokenByID :one
-select id, user_id, token_hash, issued_at, expires_at, revoked_at, user_agent, ip
+select id, user_id, token_hash, issued_at, expires_at, revoked_at, ua, ip
 from refresh_tokens
 where id = $1 and revoked_at is null
 for update;

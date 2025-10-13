@@ -1,15 +1,24 @@
-FROM golang:1.22-alpine AS build
+# Dockerfile
+FROM golang:1.24 AS build
 WORKDIR /src
-COPY go.mod go.sum ./
-RUN go mod download
-COPY . .
-RUN CGO_ENABLED=0 go build -o /out/auth ./cmd/auth-service
 
-FROM gcr.io/distroless/base-debian12
-# Non-root user
+# Optional: ensure toolchain isn’t blocked from auto (but the image is already 1.24)
+ENV CGO_ENABLED=0 GOTOOLCHAIN=auto GOFLAGS=-buildvcs=false
+
+# Cache deps/builds (requires BuildKit, which Docker Desktop has)
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    go mod download
+
+COPY . .
+RUN --mount=type=cache,target=/root/.cache/go-build \
+    go build -trimpath -ldflags="-s -w" -o /out/auth ./cmd/auth-service
+
+# Minimal runtime
+FROM gcr.io/distroless/static-debian12
 USER 10001:10001
 WORKDIR /app
 COPY --from=build /out/auth /app/auth
-# /secrets will be mounted read-only by docker-compose
 EXPOSE 8080
 ENTRYPOINT ["/app/auth"]

@@ -1,27 +1,25 @@
 package httpapi
 
 import (
-	"context"
 	"encoding/json"
-	"errors"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
 	"time"
 
 	"authentication/internal/authrepo"
-	"authentication/internal/dbgen"
 	"authentication/internal/store"
-
-	"github.com/jackc/pgx/v5"
 )
 
 // Wire this from main.go
 type Handler struct {
-	Store  *store.Store
-	Tokens *authrepo.Tokens
-	// Optionally: JWT issuer dependencies (keys, issuer, audience...)
-	JWTIssuer JWTIssuer
+	Store         *store.Store
+	Tokens        *authrepo.Tokens
+	JWTIssuer     JWTIssuer
+	CookieRefresh bool
+	Cfg           Config
+	Logger        *slog.Logger
 }
 
 // How long new refresh tokens should live
@@ -35,78 +33,57 @@ const RefreshTTL = 30 * 24 * time.Hour // 30 days
 // Returns { refresh_token, refresh_expires_at, access_token }
 func (h *Handler) RefreshToken(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
 		return
 	}
+
+	presented := bearerToken(r)
+	if presented == "" {
+		if t, ok := tokenFromJSON(r); ok {
+			presented = t
+		}
+	}
+	if presented == "" {
+		if t, ok := tokenFromCookie(r, "refresh_token"); ok {
+			presented = t
+		}
+	}
+	if presented == "" {
+		writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing refresh token"})
+		return
+	}
+
 	ctx := r.Context()
+	ua := r.UserAgent() // may be ""
+	ip := clientIP(r)   // now never ""
 
-	// 1) Extract presented token
-	token := bearerToken(r)
-	if token == "" {
-		if t2, ok := tokenFromJSON(r); ok {
-			token = t2
+	// Rotate (revokes old, creates new)
+	newCombined, newRow, err := h.Tokens.Rotate(ctx, presented, RefreshTTL, ua, ip)
+	uid := newRow.UserID
+	if err != nil {
+		if h.Logger != nil {
+			h.Logger.Error("refresh rotate failed", "err", err)
 		}
+		// Treat invalid token / replay as 401; unknowns as 500
+		// (If your Rotate returns typed errors, switch on them and return 401/409 accordingly.)
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
+		return
 	}
-	if token == "" {
-		if t3, ok := tokenFromCookie(r, "refresh_token"); ok {
-			token = t3
+	at, err := h.JWTIssuer.IssueAccessToken(ctx, uid, 15*time.Minute)
+	if err != nil {
+		if h.Logger != nil {
+			h.Logger.Error("issue access token failed", "err", err)
 		}
-	}
-	if token == "" {
-		writeJSON(w, http.StatusUnauthorized, errorBody("missing refresh token"))
+		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
 		return
 	}
 
-	ua := r.UserAgent()
-	ip := clientIP(r)
-
-	// 2) Rotate atomically in a DB transaction
-	var newCombined string
-	var newRow dbgen.RefreshToken
-	err := h.Store.WithTx(ctx, func(ctx context.Context, q dbgen.Querier) error {
-		var err error
-		newCombined, newRow, err = authrepo.RotateInTx(ctx, q, token, ua, ip, RefreshTTL)
-		return err
-	})
-	if err != nil {
-		// Error mapping
-		switch {
-		case errors.Is(err, authrepo.ErrInvalidTokenFormat),
-			errors.Is(err, authrepo.ErrTokenMismatch),
-			errors.Is(err, authrepo.ErrTokenExpired):
-			writeJSON(w, http.StatusUnauthorized, errorBody(err.Error()))
-			return
-		case errors.Is(err, pgx.ErrNoRows):
-			// No active row to lock -> already revoked/rotated
-			writeJSON(w, http.StatusConflict, errorBody("refresh token already used or revoked"))
-			return
-		default:
-			// keep details out of response in prod; log internally
-			writeJSON(w, http.StatusInternalServerError, errorBody("internal error"))
-			return
-		}
-	}
-
-	// 3) (Optional) Mint a new ACCESS token (short-lived JWT)
-	access := ""
-	if h.JWTIssuer != nil {
-		at, err := h.JWTIssuer.IssueAccessToken(ctx, newRow.UserID, 15*time.Minute)
-		if err != nil {
-			// Non-fatal; you can decide to fail or return only refresh token
-			writeJSON(w, http.StatusInternalServerError, errorBody("failed to issue access token"))
-			return
-		}
-		access = at
-	}
-
-	// 4) Respond
-	resp := map[string]any{
-		"refresh_token":      newCombined,      // "id.plain"
-		"refresh_expires_at": newRow.ExpiresAt, // time.Time (sqlc override)
-		"access_token":       access,           // may be ""
+	writeJSON(w, http.StatusOK, map[string]any{
+		"access_token":       at,
 		"token_type":         "Bearer",
-	}
-	writeJSON(w, http.StatusOK, resp)
+		"refresh_token":      newCombined,
+		"refresh_expires_at": time.Now().Add(RefreshTTL),
+	})
 }
 
 // ----- Helpers -----
@@ -145,22 +122,25 @@ func tokenFromCookie(r *http.Request, name string) (string, bool) {
 }
 
 func clientIP(r *http.Request) string {
-	// If behind proxy, prefer standard headers (trust only in known infra!)
+	// X-Forwarded-For: take the first non-empty, valid IP
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// use the left-most IP
-		if comma := strings.Index(xff, ","); comma >= 0 {
-			return strings.TrimSpace(xff[:comma])
+		for _, part := range strings.Split(xff, ",") {
+			ip := strings.TrimSpace(part)
+			if net.ParseIP(ip) != nil {
+				return ip
+			}
 		}
-		return strings.TrimSpace(xff)
 	}
-	if cip := r.Header.Get("CF-Connecting-IP"); cip != "" {
-		return strings.TrimSpace(cip)
+	// X-Real-IP
+	if xr := strings.TrimSpace(r.Header.Get("X-Real-IP")); xr != "" && net.ParseIP(xr) != nil {
+		return xr
 	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
+	// RemoteAddr
+	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil && net.ParseIP(host) != nil {
+		return host
 	}
-	return host
+	// Fallback for INET NOT NULL
+	return "0.0.0.0"
 }
 
 func errorBody(msg string) map[string]string {

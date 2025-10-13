@@ -1,0 +1,123 @@
+{
+  "info": {
+    "name": "Auth Service Smoke",
+    "_postman_id": "f6f0a7d4-8c66-4f4e-9fd7-000000000001",
+    "description": "Signup, Login, Me, Refresh, Logout, Logout-all",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8080" },
+    { "key": "email", "value": "alice@example.com" },
+    { "key": "password", "value": "Secret123!" },
+    { "key": "access_token", "value": "" },
+    { "key": "refresh_token", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "Signup",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json"}],
+        "url": "{{baseUrl}}/v1/auth/signup",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\",\n  \"first_name\":\"Alice\",\n  \"last_name\":\"A\"\n}"
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "exec": [
+            "let d = {}; try { d = pm.response.json() } catch(e) {}",
+            "pm.collectionVariables.set('access_token', d.access_token || '');",
+            "pm.collectionVariables.set('refresh_token', d.refresh_token || '');",
+            "pm.test('status 201', function(){ pm.response.to.have.status(201); });"
+          ],
+          "type": "text/javascript"
+        }
+      }]
+    },
+    {
+      "name": "Login",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json"}],
+        "url": "{{baseUrl}}/v1/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}"
+        }
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "exec": [
+            "let d = {}; try { d = pm.response.json() } catch(e) {}",
+            "pm.collectionVariables.set('access_token', d.access_token || '');",
+            "pm.collectionVariables.set('refresh_token', d.refresh_token || '');",
+            "pm.test('status 200', function(){ pm.response.to.have.status(200); });"
+          ],
+          "type": "text/javascript"
+        }
+      }]
+    },
+    {
+      "name": "Me",
+      "request": {
+        "method": "GET",
+        "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+        "url": "{{baseUrl}}/v1/me"
+      },
+      "event": [{
+        "listen": "test",
+        "script": { "exec": ["pm.test('status 200', function(){ pm.response.to.have.status(200); });"] }
+      }]
+    },
+    {
+      "name": "Refresh (Bearer RT)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Authorization", "value": "Bearer {{refresh_token}}" },
+          { "key": "Content-Type", "value": "application/json"}
+        ],
+        "url": "{{baseUrl}}/v1/tokens/refresh"
+      },
+      "event": [{
+        "listen": "test",
+        "script": {
+          "exec": [
+            "let d = {}; try { d = pm.response.json() } catch(e) {}",
+            "pm.collectionVariables.set('access_token', d.access_token || '');",
+            "pm.collectionVariables.set('refresh_token', d.refresh_token || '');",
+            "pm.test('status 200', function(){ pm.response.to.have.status(200); });"
+          ]
+        }
+      }]
+    },
+    {
+      "name": "Logout (revoke one RT)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Authorization", "value": "Bearer {{refresh_token}}" }],
+        "url": "{{baseUrl}}/v1/auth/logout"
+      },
+      "event": [{
+        "listen": "test",
+        "script": { "exec": ["pm.test('status 204', function(){ pm.response.to.have.status(204); });"] }
+      }]
+    },
+    {
+      "name": "Logout All (access required)",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Authorization", "value": "Bearer {{access_token}}" }],
+        "url": "{{baseUrl}}/v1/auth/logout-all"
+      },
+      "event": [{
+        "listen": "test",
+        "script": { "exec": ["pm.test('status 204', function(){ pm.response.to.have.status(204); });"] }
+      }]
+    }
+  ]
+}
