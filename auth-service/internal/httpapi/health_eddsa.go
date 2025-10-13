@@ -3,7 +3,6 @@ package httpapi
 import (
 	"context"
 	"crypto/ed25519"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"time"
@@ -71,10 +70,4 @@ type jwksEdAdapter struct{ P *HTTPMultiJWKSProvider }
 
 func (a jwksEdAdapter) Get(ctx context.Context, kid string) (ed25519.PublicKey, error) {
 	return a.P.GetEd25519(ctx, kid)
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
 }

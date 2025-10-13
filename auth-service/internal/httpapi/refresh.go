@@ -3,7 +3,6 @@ package httpapi
 import (
 	"encoding/json"
 	"log/slog"
-	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -119,28 +118,6 @@ func tokenFromCookie(r *http.Request, name string) (string, bool) {
 		return "", false
 	}
 	return strings.TrimSpace(c.Value), c.Value != ""
-}
-
-func clientIP(r *http.Request) string {
-	// X-Forwarded-For: take the first non-empty, valid IP
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		for _, part := range strings.Split(xff, ",") {
-			ip := strings.TrimSpace(part)
-			if net.ParseIP(ip) != nil {
-				return ip
-			}
-		}
-	}
-	// X-Real-IP
-	if xr := strings.TrimSpace(r.Header.Get("X-Real-IP")); xr != "" && net.ParseIP(xr) != nil {
-		return xr
-	}
-	// RemoteAddr
-	if host, _, err := net.SplitHostPort(r.RemoteAddr); err == nil && net.ParseIP(host) != nil {
-		return host
-	}
-	// Fallback for INET NOT NULL
-	return "0.0.0.0"
 }
 
 func errorBody(msg string) map[string]string {
