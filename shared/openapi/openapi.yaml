@@ -1,0 +1,144 @@
+openapi: 3.0.3
+info:
+  title: Auth Service API
+  version: 0.1.0
+servers:
+  - url: http://localhost:8080
+
+paths:
+  /v1/auth/signup:
+    post:
+      summary: Create user and return tokens
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/SignupRequest' }
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '409': { description: Email in use }
+        '400': { description: Bad request }
+        '500': { description: Server error }
+
+  /v1/auth/login:
+    post:
+      summary: Login and return tokens
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthResponse' }
+        '401': { description: Invalid credentials }
+
+  /v1/tokens/refresh:
+    post:
+      summary: Rotate refresh token and return new access+refresh
+      security:
+        - bearerRefresh: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RefreshResponse' }
+        '401': { description: Invalid refresh token }
+
+  /v1/auth/logout:
+    post:
+      summary: Revoke a specific refresh token
+      security:
+        - bearerRefresh: []
+      responses:
+        '204': { description: No Content }
+        '401': { description: Invalid refresh token }
+
+  /v1/auth/logout-all:
+    post:
+      summary: Revoke all refresh tokens for the caller
+      security:
+        - bearerAccess: []
+      responses:
+        '204': { description: No Content }
+        '401': { description: Unauthorized }
+
+  /v1/me:
+    get:
+      summary: Return the caller's profile
+      security:
+        - bearerAccess: []
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { description: Unauthorized }
+
+components:
+  securitySchemes:
+    bearerAccess:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+    bearerRefresh:
+      type: http
+      scheme: bearer
+      bearerFormat: Opaque
+
+  schemas:
+    User:
+      type: object
+      required: [id, email, active]
+      properties:
+        id: { type: integer, format: int64 }
+        email: { type: string, format: email }
+        first_name: { type: string }
+        last_name: { type: string }
+        active: { type: boolean }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+
+    SignupRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+        first_name: { type: string }
+        last_name: { type: string }
+
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+
+    AuthResponse:
+      type: object
+      required: [user, access_token, token_type, refresh_token, refresh_expires_at]
+      properties:
+        user: { $ref: '#/components/schemas/User' }
+        access_token: { type: string }
+        token_type: { type: string, example: Bearer }
+        refresh_token: { type: string }
+        refresh_expires_at: { type: string, format: date-time }
+
+    RefreshResponse:
+      type: object
+      required: [access_token, token_type, refresh_token, refresh_expires_at]
+      properties:
+        access_token: { type: string }
+        token_type: { type: string, example: Bearer }
+        refresh_token: { type: string }
+        refresh_expires_at: { type: string, format: date-time }

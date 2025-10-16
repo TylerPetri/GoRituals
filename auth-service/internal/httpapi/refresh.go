@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"authentication/internal/authrepo"
-	"authentication/internal/store"
+	"github.com/tylerpetri/GoRituals/auth-service/internal/authrepo"
+	"github.com/tylerpetri/GoRituals/auth-service/internal/store"
 )
 
 // Wire this from main.go

@@ -1,8 +1,9 @@
 package httpapi
 
 import (
-	"authentication/internal/dbgen"
 	"database/sql"
+
+	"github.com/tylerpetri/GoRituals/auth-service/internal/dbgen"
 )
 
 func toUserDTO(u dbgen.User) userDTO {

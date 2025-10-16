@@ -280,14 +280,14 @@ type ctxKey int
 const userIDKey ctxKey = 1
 
 // UserIDFromContext returns the authenticated user id, if present.
-func UserIDFromContext(ctx context.Context) (int64, bool) {
-	v := ctx.Value(userIDKey)
-	if v == nil {
-		return 0, false
-	}
-	id, ok := v.(int64)
-	return id, ok
-}
+// func UserIDFromContext(ctx context.Context) (int64, bool) {
+// 	v := ctx.Value(userIDKey)
+// 	if v == nil {
+// 		return 0, false
+// 	}
+// 	id, ok := v.(int64)
+// 	return id, ok
+// }
 
 // AuthMiddleware extracts Bearer token, verifies it, and puts userID in context.
 func AuthMiddleware(ver *JWTVerifier, next http.Handler) http.Handler {

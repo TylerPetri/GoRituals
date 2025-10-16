@@ -8,10 +8,10 @@ import (
 	"os"
 	"time"
 
-	"authentication/internal/authrepo"
-	"authentication/internal/dbgen"
-	"authentication/internal/httpapi"
-	"authentication/internal/store"
+	"github.com/tylerpetri/GoRituals/auth-service/internal/authrepo"
+	"github.com/tylerpetri/GoRituals/auth-service/internal/dbgen"
+	"github.com/tylerpetri/GoRituals/auth-service/internal/httpapi"
+	"github.com/tylerpetri/GoRituals/auth-service/internal/store"
 )
 
 func mustEnv(k string) string {

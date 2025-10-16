@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"authentication/internal/dbgen"
+	"github.com/tylerpetri/GoRituals/auth-service/internal/dbgen"
 )
 
 var (

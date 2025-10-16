@@ -8,8 +8,10 @@ import (
 
 	"github.com/jackc/pgconn"
 
-	"authentication/internal/authrepo"
-	"authentication/internal/dbgen"
+	"github.com/tylerpetri/GoRituals/auth-service/internal/authrepo"
+	"github.com/tylerpetri/GoRituals/auth-service/internal/dbgen"
+
+	authkit "github.com/tylerpetri/GoRituals/shared/authkit"
 )
 
 type signupReq struct {
@@ -220,7 +222,7 @@ func (h *Handler) LogoutAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	uid, ok := UserIDFromContext(ctx)
+	uid, ok := authkit.UserIDFromContext(ctx)
 	if !ok || uid <= 0 {
 		writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -244,7 +246,7 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	uid, ok := UserIDFromContext(ctx)
+	uid, ok := authkit.UserIDFromContext(ctx)
 	if !ok || uid <= 0 {
 		writeErr(w, http.StatusUnauthorized, "unauthorized")
 		return

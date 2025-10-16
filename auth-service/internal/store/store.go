@@ -1,13 +1,14 @@
 package store
 
 import (
-	"authentication/internal/dbgen"
 	"context"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/tylerpetri/GoRituals/auth-service/internal/dbgen"
 )
 
 type Store struct {

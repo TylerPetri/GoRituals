@@ -4,7 +4,7 @@ import (
 	"context"
 	"database/sql"
 
-	"authentication/internal/dbgen"
+	"github.com/tylerpetri/GoRituals/auth-service/internal/dbgen"
 )
 
 type Users struct {
