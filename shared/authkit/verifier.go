@@ -1,6 +1,7 @@
 package authkit
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -68,11 +69,17 @@ func (v *rs256Verifier) Verify(tok string) (*Claims, error) {
 		if kid == "" {
 			return nil, errors.New("missing kid")
 		}
-		pub, ok := v.jwks.Get(kid)
-		if !ok {
-			return nil, errors.New("kid not found")
+
+		// 1) try cache
+		if pub, ok := v.jwks.Get(kid); ok {
+			return pub, nil
 		}
-		return pub, nil
+		// 2) on-demand fetch + retry (handles startup race)
+		_ = v.jwks.Fetch(context.Background())
+		if pub, ok := v.jwks.Get(kid); ok {
+			return pub, nil
+		}
+		return nil, errors.New("kid not found")
 	}, jwt.WithLeeway(v.opt.Leeway))
 	if err != nil || !t.Valid {
 		return nil, ErrVerify
@@ -104,15 +111,22 @@ func (v *eddsaVerifier) Verify(tok string) (*Claims, error) {
 		if kid == "" {
 			return nil, errors.New("missing kid")
 		}
-		pub, ok := v.jwks.Get(kid)
-		if !ok {
-			return nil, errors.New("kid not found")
+
+		// 1) try cache
+		if pub, ok := v.jwks.Get(kid); ok {
+			return pub, nil
 		}
-		return pub, nil
+		// 2) on-demand fetch + retry (handles startup race)
+		_ = v.jwks.Fetch(context.Background())
+		if pub, ok := v.jwks.Get(kid); ok {
+			return pub, nil
+		}
+		return nil, errors.New("kid not found")
 	}, jwt.WithLeeway(v.opt.Leeway))
 	if err != nil || !t.Valid {
 		return nil, ErrVerify
 	}
+
 	var uc Claims
 	if err := mapClaims(t.Claims, &uc, v.opt); err != nil {
 		return nil, err

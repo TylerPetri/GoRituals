@@ -1,20 +1,13 @@
-# auth-service/Dockerfile
 FROM golang:1.24 AS build
 WORKDIR /src
 
-# 1) bring in modules (authkit + service)
-COPY shared/authkit/go.mod shared/authkit/
-COPY shared/authkit/ shared/authkit/
-COPY auth-service/go.mod auth-service/go.sum auth-service/
-RUN --mount=type=cache,target=/go/pkg/mod \
-    cd auth-service && go mod tidy
+# Copy BOTH modules so the replace ../shared/authkit resolves
+COPY shared/authkit/ ./shared/authkit/
+COPY auth-service/   ./auth-service/
 
-# 2) copy sources
-COPY auth-service/ auth-service/
-
-# 3) build
-RUN --mount=type=cache,target=/go/pkg/mod \
-    cd auth-service && CGO_ENABLED=0 go build -o /out/auth ./cmd/auth-service
+WORKDIR /src/auth-service
+RUN go mod tidy
+RUN CGO_ENABLED=0 go build -o /out/auth ./cmd/auth-service
 
 FROM gcr.io/distroless/base-debian12
 COPY --from=build /out/auth /auth
