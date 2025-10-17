@@ -1,8 +1,10 @@
 package authkit
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -125,44 +127,89 @@ func mapClaims(src jwt.Claims, dst *Claims, opt Options) error {
 	if !ok {
 		return ErrVerify
 	}
-	// Required
+
 	iss, _ := m["iss"].(string)
-	aud, _ := m["aud"].(string)
-	expf, ok := m["exp"].(float64)
-	if !ok {
+
+	// aud can be string or array
+	var audVal string
+	var audMatch bool
+	switch v := m["aud"].(type) {
+	case string:
+		audVal = v
+		audMatch = (opt.Audience == "" || v == opt.Audience)
+	case []any:
+		for _, e := range v {
+			if s, ok := e.(string); ok {
+				if opt.Audience == "" || s == opt.Audience {
+					audVal = s
+					audMatch = true
+					break
+				}
+			}
+		}
+	case []string:
+		for _, s := range v {
+			if opt.Audience == "" || s == opt.Audience {
+				audVal = s
+				audMatch = true
+				break
+			}
+		}
+	}
+
+	// exp
+	var expUnix int64
+	switch v := m["exp"].(type) {
+	case float64:
+		expUnix = int64(v)
+	case json.Number:
+		if n, err := v.Int64(); err == nil {
+			expUnix = n
+		}
+	}
+	if expUnix == 0 {
 		return ErrVerify
 	}
 
+	// iss/aud checks
 	if opt.Issuer != "" && iss != opt.Issuer {
 		return ErrVerify
 	}
-	if opt.Audience != "" && aud != opt.Audience {
+	if opt.Audience != "" && !audMatch {
 		return ErrVerify
 	}
 
-	dst.Iss, dst.Aud = iss, aud
-	dst.Exp = time.Unix(int64(expf), 0)
+	dst.Iss, dst.Aud = iss, audVal
+	dst.Exp = time.Unix(expUnix, 0)
 
-	// Optional app claims
+	// app claims:
+	// prefer uid (int), else derive from sub if numeric string
 	switch v := m["uid"].(type) {
 	case float64:
 		dst.UserID = int64(v)
 	case int64:
 		dst.UserID = v
 	}
+	if sub, ok := m["sub"].(string); ok {
+		dst.Sub = sub
+		if dst.UserID == 0 {
+			if n, err := strconv.ParseInt(sub, 10, 64); err == nil {
+				dst.UserID = n
+			}
+		}
+	}
+	// scopes optional
 	if scp, ok := m["scp"].([]any); ok {
-		dst.Scopes = make([]string, 0, len(scp))
+		dst.Scopes = dst.Scopes[:0]
 		for _, s := range scp {
 			if str, ok := s.(string); ok {
 				dst.Scopes = append(dst.Scopes, str)
 			}
 		}
 	}
-	if sub, ok := m["sub"].(string); ok {
-		dst.Sub = sub
-	}
 	if jti, ok := m["jti"].(string); ok {
 		dst.Jti = jti
 	}
+
 	return nil
 }

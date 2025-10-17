@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	authkit "github.com/tylerpetri/GoRituals/shared/authkit"
 )
 
 // BuildIssuer builds the configured JWTIssuer and (optionally) the RSA/Ed issuers used for JWKS.
@@ -174,11 +176,11 @@ func BuildAuthMiddleware(cfg Config, rsaIss *RSAJWKSIssuer, edIss *Ed25519Issuer
 	}
 }
 
-func NewMux(h *Handler, rsaIss *RSAJWKSIssuer, edIss *Ed25519Issuer, publicBase string) *http.ServeMux {
+func NewMux(h *Handler, ver authkit.Verifier, rsaIss *RSAJWKSIssuer, edIss *Ed25519Issuer, publicBase string) *http.ServeMux {
 	mux := http.NewServeMux()
 
+	// public routes
 	mux.Handle("/.well-known/jwks.json", CombinedJWKSHandler(rsaIss, edIss))
-
 	if rsaIss != nil {
 		mux.HandleFunc("/health/jwks/rs256", jwksHealthRS(rsaIss, publicBase))
 	}
@@ -189,18 +191,16 @@ func NewMux(h *Handler, rsaIss *RSAJWKSIssuer, edIss *Ed25519Issuer, publicBase 
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-
-	// Public auth routes
 	mux.HandleFunc("/v1/auth/signup", h.SignUp)
 	mux.HandleFunc("/v1/auth/login", h.Login)
-	mux.HandleFunc("/v1/auth/logout", h.Logout)
-	mux.HandleFunc("/v1/tokens/refresh", h.RefreshToken)
+	mux.HandleFunc("/v1/auth/logout", h.Logout)          // uses refresh token (not protected by AT)
+	mux.HandleFunc("/v1/tokens/refresh", h.RefreshToken) // uses refresh token
 
-	// Protected routes
-	authz := BuildAuthMiddleware(h.Cfg, rsaIss, edIss)
+	// protected by ACCESS token:
+	protected := authkit.AuthMiddleware(ver, nil)
+	mux.Handle("/v1/auth/logout-all", protected(http.HandlerFunc(h.LogoutAll)))
+	mux.Handle("/v1/me", protected(http.HandlerFunc(h.Me)))
 
-	mux.Handle("/v1/auth/logout-all", authz(http.HandlerFunc(h.LogoutAll)))
-	mux.Handle("/v1/me", authz(http.HandlerFunc(h.Me)))
-
+	// (JWKS and alg-specific health routes you already have)
 	return mux
 }

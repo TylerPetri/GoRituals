@@ -1,24 +1,23 @@
-# Dockerfile
+# auth-service/Dockerfile
 FROM golang:1.24 AS build
 WORKDIR /src
 
-# Optional: ensure toolchain isn’t blocked from auto (but the image is already 1.24)
-ENV CGO_ENABLED=0 GOTOOLCHAIN=auto GOFLAGS=-buildvcs=false
-
-# Cache deps/builds (requires BuildKit, which Docker Desktop has)
-COPY go.mod go.sum ./
+# 1) bring in modules (authkit + service)
+COPY shared/authkit/go.mod shared/authkit/
+COPY shared/authkit/ shared/authkit/
+COPY auth-service/go.mod auth-service/go.sum auth-service/
 RUN --mount=type=cache,target=/go/pkg/mod \
-    --mount=type=cache,target=/root/.cache/go-build \
-    go mod download
+    cd auth-service && go mod tidy
 
-COPY . .
-RUN --mount=type=cache,target=/root/.cache/go-build \
-    go build -trimpath -ldflags="-s -w" -o /out/auth ./cmd/auth-service
+# 2) copy sources
+COPY auth-service/ auth-service/
 
-# Minimal runtime
-FROM gcr.io/distroless/static-debian12
-USER 10001:10001
-WORKDIR /app
-COPY --from=build /out/auth /app/auth
+# 3) build
+RUN --mount=type=cache,target=/go/pkg/mod \
+    cd auth-service && CGO_ENABLED=0 go build -o /out/auth ./cmd/auth-service
+
+FROM gcr.io/distroless/base-debian12
+COPY --from=build /out/auth /auth
 EXPOSE 8080
-ENTRYPOINT ["/app/auth"]
+USER nonroot:nonroot
+ENTRYPOINT ["/auth"]

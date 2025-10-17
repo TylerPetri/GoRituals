@@ -6,6 +6,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.0
 	github.com/jackc/pgconn v1.14.3
 	github.com/jackc/pgx/v5 v5.7.6
+	github.com/tylerpetri/GoRituals/shared/authkit v0.0.0-20251016224101-0005d8f9f87d
 	golang.org/x/crypto v0.43.0
 )
 
@@ -20,3 +21,5 @@ require (
 	golang.org/x/sys v0.37.0 // indirect
 	golang.org/x/text v0.30.0 // indirect
 )
+
+replace github.com/tylerpetri/GoRituals/shared/authkit => ../shared/authkit

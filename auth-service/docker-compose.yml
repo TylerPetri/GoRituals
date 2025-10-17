@@ -19,8 +19,10 @@ services:
 
   # Your auth service (already built in your repo)
   auth:
-    build: .
-    env_file: .env
+    build: 
+      context: ..
+      dockerfile: auth-service/Dockerfile
+    env_file: ./.env
     depends_on:
       db:
         condition: service_healthy
